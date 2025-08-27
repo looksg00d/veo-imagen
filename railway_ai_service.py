@@ -13,6 +13,8 @@ import base64
 import tempfile
 import threading
 from datetime import datetime
+import pickle
+from pathlib import Path
 
 app = Flask(__name__)
 
@@ -88,8 +90,45 @@ MODELS = {
 PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "sodium-gateway-465110-q3")
 LOCATION = os.getenv("GOOGLE_LOCATION", "us-central1")
 
-# Хранилище для долгосрочных операций
-operations_store = {}
+# Постоянное хранилище для операций
+OPERATIONS_FILE = "operations_store.pkl"
+
+def load_operations_store():
+    """Загружает хранилище операций из файла"""
+    try:
+        if os.path.exists(OPERATIONS_FILE):
+            with open(OPERATIONS_FILE, 'rb') as f:
+                return pickle.load(f)
+    except Exception as e:
+        print(f"Ошибка загрузки хранилища: {e}")
+    return {}
+
+def save_operations_store(operations_store):
+    """Сохраняет хранилище операций в файл"""
+    try:
+        with open(OPERATIONS_FILE, 'wb') as f:
+            pickle.dump(operations_store, f)
+    except Exception as e:
+        print(f"Ошибка сохранения хранилища: {e}")
+
+def get_operations_store():
+    """Получает текущее хранилище операций"""
+    return load_operations_store()
+
+def update_operation(operation_id, updates):
+    """Обновляет операцию в хранилище"""
+    operations_store = get_operations_store()
+    if operation_id in operations_store:
+        operations_store[operation_id].update(updates)
+        save_operations_store(operations_store)
+        return True
+    return False
+
+def add_operation(operation_id, operation_data):
+    """Добавляет новую операцию в хранилище"""
+    operations_store = get_operations_store()
+    operations_store[operation_id] = operation_data
+    save_operations_store(operations_store)
 
 def get_access_token():
     """Получает access token из переменных окружения или cred.json"""
@@ -271,7 +310,7 @@ def generate_content(model_name, prompt, aspect_ratio, resolution):
                 operation_id = f"op_{int(time.time())}_{hash(operation_name) % 10000}"
                 
                 # Сохраняем операцию
-                operations_store[operation_id] = {
+                add_operation(operation_id, {
                     "operation_name": operation_name,
                     "model_id": model_config["model_id"],
                     "access_token": access_token,
@@ -279,7 +318,7 @@ def generate_content(model_name, prompt, aspect_ratio, resolution):
                     "created_at": datetime.now().isoformat(),
                     "model_name": model_name,
                     "prompt": prompt
-                }
+                })
                 
                 # Запускаем асинхронную обработку
                 threading.Thread(
@@ -326,9 +365,11 @@ def poll_video_operation_async(operation_id, operation_name, model_id, access_to
             
             if result.get("done"):
                 # Операция завершена
-                operations_store[operation_id]["status"] = "completed"
-                operations_store[operation_id]["result"] = result
-                operations_store[operation_id]["completed_at"] = datetime.now().isoformat()
+                update_operation(operation_id, {
+                    "status": "completed",
+                    "result": result,
+                    "completed_at": datetime.now().isoformat()
+                })
                 
                 # Обрабатываем результат
                 if result.get("response", {}).get("videos"):
@@ -340,26 +381,25 @@ def poll_video_operation_async(operation_id, operation_name, model_id, access_to
                         temp_file.write(video_data)
                         temp_file.close()
                         
-                        operations_store[operation_id]["file_path"] = temp_file.name
-                        operations_store[operation_id]["file_type"] = "video/mp4"
+                        update_operation(operation_id, {"file_path": temp_file.name, "file_type": "video/mp4"})
                 
                 break
                 
             time.sleep(15)  # Ждем 15 секунд между проверками
             
         except Exception as e:
-            operations_store[operation_id]["status"] = "error"
-            operations_store[operation_id]["error"] = str(e)
+            update_operation(operation_id, {"status": "error", "error": str(e)})
             break
     
-    if operations_store[operation_id]["status"] == "processing":
-        operations_store[operation_id]["status"] = "timeout"
-        operations_store[operation_id]["error"] = "Превышено время ожидания"
+    operations_store = get_operations_store()
+    if operation_id in operations_store and operations_store[operation_id]["status"] == "processing":
+        update_operation(operation_id, {"status": "timeout", "error": "Превышено время ожидания"})
 
 @app.route("/status/<operation_id>", methods=["GET"])
 def get_operation_status(operation_id):
     """Получить статус долгосрочной операции"""
     
+    operations_store = get_operations_store()
     if operation_id not in operations_store:
         return jsonify({"error": "Операция не найдена"}), 404
     
@@ -389,6 +429,7 @@ def get_operation_status(operation_id):
 def download_file(operation_id):
     """Скачать сгенерированный файл"""
     
+    operations_store = get_operations_store()
     if operation_id not in operations_store:
         return jsonify({"error": "Операция не найдена"}), 404
     
@@ -423,7 +464,7 @@ def handle_image_result(result, model_name, prompt):
             
             # Создаем операцию для изображения
             operation_id = f"img_{int(time.time())}_{hash(prompt) % 10000}"
-            operations_store[operation_id] = {
+            add_operation(operation_id, {
                 "status": "completed",
                 "model_name": model_name,
                 "prompt": prompt,
@@ -431,7 +472,7 @@ def handle_image_result(result, model_name, prompt):
                 "file_type": "image/png",
                 "created_at": datetime.now().isoformat(),
                 "completed_at": datetime.now().isoformat()
-            }
+            })
             
             return {
                 "operation_id": operation_id,
