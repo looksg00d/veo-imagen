@@ -52,7 +52,7 @@ MODELS = {
     
     # === IMAGEN МОДЕЛИ ===
     "imagen4": {
-        "model_id": "imagen-4.0-generate",
+        "model_id": "imagen-4.0-generate-001",
         "type": "image",
         "endpoint": "predict",
         "description": "Imagen 4 (новейшая) - высококачественные изображения",
@@ -60,10 +60,18 @@ MODELS = {
         "default_ratio": "1:1"
     },
     "imagen4-fast": {
-        "model_id": "imagen-4.0-fast-generate", 
+        "model_id": "imagen-4.0-fast-generate-001", 
         "type": "image",
         "endpoint": "predict",
         "description": "Imagen 4 Fast - быстрая генерация изображений",
+        "supported_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+        "default_ratio": "1:1"
+    },
+    "imagen4-ultra": {
+        "model_id": "imagen-4.0-ultra-generate-001",
+        "type": "image",
+        "endpoint": "predict",
+        "description": "Imagen 4 Ultra - максимальное качество изображений",
         "supported_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
         "default_ratio": "1:1"
     },
